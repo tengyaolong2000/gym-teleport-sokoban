@@ -16,6 +16,8 @@ def room_to_rgb(room, room_structure=None):
     if not room_structure is None:
         # Change the ID of a player on a target
         room[(room == 5) & (room_structure == 2)] = 6
+        # Note: Boxes on teleporters (room == 3 or 4, room_structure == 7) 
+        # are rendered as regular boxes, which is correct - the box blocks the teleporter
 
     # Load images, representing the corresponding situation
     box_filename = pkg_resources.resource_filename(resource_package, '/'.join(('surface', 'box.png')))
@@ -41,7 +43,13 @@ def room_to_rgb(room, room_structure=None):
     wall_filename = pkg_resources.resource_filename(resource_package, '/'.join(('surface', 'wall.png')))
     wall = imageio.imread(wall_filename)
 
-    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target]
+    teleporter_filename = pkg_resources.resource_filename(resource_package, '/'.join(('surface', 'teleporter.png')))
+    teleporter = imageio.imread(teleporter_filename)
+    # Convert RGBA to RGB if necessary
+    if teleporter.shape[2] == 4:
+        teleporter = teleporter[:, :, :3]
+
+    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target, teleporter]
 
     # Assemble the new rgb_room, with all loaded images
     room_rgb = np.zeros(shape=(room.shape[0] * 16, room.shape[1] * 16, 3), dtype=np.uint8)
@@ -71,8 +79,9 @@ def room_to_tiny_world_rgb(room, room_structure=None, scale=1):
     box = [142, 121, 56]
     player = [160, 212, 56]
     player_on_target = [219, 212, 56]
+    teleporter = [128, 0, 255]  # Purple color for teleporters
 
-    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target]
+    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target, teleporter]
 
     # Assemble the new rgb_room, with all loaded images
     room_small_rgb = np.zeros(shape=(room.shape[0]*scale, room.shape[1]*scale, 3), dtype=np.uint8)
@@ -124,7 +133,13 @@ def room_to_rgb_FT(room, box_mapping, room_structure=None):
     wall_filename = pkg_resources.resource_filename(resource_package, '/'.join(('surface', 'wall.png')))
     wall = imageio.imread(wall_filename)
 
-    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target]
+    teleporter_filename = pkg_resources.resource_filename(resource_package, '/'.join(('surface', 'teleporter.png')))
+    teleporter = imageio.imread(teleporter_filename)
+    # Convert RGBA to RGB if necessary
+    if teleporter.shape[2] == 4:
+        teleporter = teleporter[:, :, :3]
+
+    surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target, teleporter]
 
     # Assemble the new rgb_room, with all loaded images
     room_rgb = np.zeros(shape=(room.shape[0] * 16, room.shape[1] * 16, 3), dtype=np.uint8)
@@ -188,8 +203,9 @@ def room_to_tiny_world_rgb_FT(room, box_mapping, room_structure=None, scale=1):
         box = [142, 121, 56]
         player = [160, 212, 56]
         player_on_target = [219, 212, 56]
+        teleporter = [128, 0, 255]  # Purple color for teleporters
 
-        surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target]
+        surfaces = [wall, floor, box_target, box_on_target, box, player, player_on_target, teleporter]
 
         # Assemble the new rgb_room, with all loaded images
         room_small_rgb = np.zeros(shape=(room.shape[0] * scale, room.shape[1] * scale, 3), dtype=np.uint8)
@@ -316,7 +332,9 @@ TYPE_LOOKUP = {
     2: 'box target',
     3: 'box on target',
     4: 'box not on target',
-    5: 'player'
+    5: 'player',
+    6: 'player on target',
+    7: 'teleporter'
 }
 
 ACTION_LOOKUP = {

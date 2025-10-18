@@ -18,6 +18,7 @@ class SokobanEnv(gym.Env):
                  max_steps=120,
                  num_boxes=4,
                  num_gen_steps=None,
+                 num_teleporters=0,
                  reset=True):
 
         # General Configuration
@@ -28,6 +29,8 @@ class SokobanEnv(gym.Env):
             self.num_gen_steps = num_gen_steps
 
         self.num_boxes = num_boxes
+        self.num_teleporters = num_teleporters
+        self.teleporter_pairs = []  # List of (from_pos, to_pos) tuples
         self.boxes_on_target = 0
 
         # Penalties and Rewards
@@ -110,7 +113,7 @@ class SokobanEnv(gym.Env):
 
 
         can_push_box = self.room_state[new_position[0], new_position[1]] in [3, 4]
-        can_push_box &= self.room_state[new_box_position[0], new_box_position[1]] in [1, 2]
+        can_push_box &= self.room_state[new_box_position[0], new_box_position[1]] in [1, 2, 7]
         if can_push_box:
 
             self.new_box_position = tuple(new_box_position)
@@ -127,6 +130,11 @@ class SokobanEnv(gym.Env):
             if self.room_fixed[new_box_position[0], new_box_position[1]] == 2:
                 box_type = 3
             self.room_state[new_box_position[0], new_box_position[1]] = box_type
+            
+            # Check if player landed on a teleporter after pushing and teleport them
+            if self.room_fixed[new_position[0], new_position[1]] == 7:
+                self._try_teleport(tuple(new_position))
+            
             return True, True
 
         # Try to move if no box to push, available
@@ -144,16 +152,66 @@ class SokobanEnv(gym.Env):
         current_position = self.player_position.copy()
 
         # Move player if the field in the moving direction is either
-        # an empty field or an empty box target.
-        if self.room_state[new_position[0], new_position[1]] in [1, 2]:
+        # an empty field, an empty box target, or a teleporter.
+        if self.room_state[new_position[0], new_position[1]] in [1, 2, 7]:
             self.player_position = new_position
             self.room_state[(new_position[0], new_position[1])] = 5
             self.room_state[current_position[0], current_position[1]] = \
                 self.room_fixed[current_position[0], current_position[1]]
 
+            # Check if player stepped on a teleporter and teleport them
+            if self.room_fixed[new_position[0], new_position[1]] == 7:
+                teleported = self._try_teleport(tuple(new_position))
+                if teleported:
+                    return True
+
             return True
 
         return False
+
+    def _try_teleport(self, from_position):
+        """
+        Attempts to teleport the player from the given position to its paired teleporter.
+        Teleportation only occurs if the destination teleporter is not blocked by a box.
+        :param from_position: tuple (row, col) of the teleporter the player is on
+        :return: Boolean indicating whether teleportation occurred
+        """
+        # Find the paired teleporter
+        destination = None
+        for tp_pair in self.teleporter_pairs:
+            if tp_pair[0] == from_position:
+                destination = tp_pair[1]
+                break
+            elif tp_pair[1] == from_position:
+                destination = tp_pair[0]
+                break
+        
+        if destination is None:
+            return False
+        
+        # Check if destination teleporter is blocked by a box
+        if self._is_teleporter_blocked(destination):
+            return False
+        
+        # Perform teleportation
+        current_position = self.player_position.copy()
+        self.player_position = np.array(destination)
+        
+        # Update room state
+        self.room_state[current_position[0], current_position[1]] = \
+            self.room_fixed[current_position[0], current_position[1]]
+        self.room_state[destination[0], destination[1]] = 5
+        
+        return True
+    
+    def _is_teleporter_blocked(self, teleporter_position):
+        """
+        Checks if a teleporter is blocked by a box.
+        :param teleporter_position: tuple (row, col) of the teleporter
+        :return: Boolean indicating whether the teleporter is blocked
+        """
+        # A teleporter is blocked if there's a box on it (state 3 or 4)
+        return self.room_state[teleporter_position[0], teleporter_position[1]] in [3, 4]
 
     def _calc_reward(self):
         """
@@ -201,11 +259,13 @@ class SokobanEnv(gym.Env):
 
     def reset(self, second_player=False, render_mode='rgb_array'):
         try:
-            self.room_fixed, self.room_state, self.box_mapping = generate_room(
+            # Generate room with teleporters already included and validated for solvability
+            self.room_fixed, self.room_state, self.box_mapping, self.teleporter_pairs = generate_room(
                 dim=self.dim_room,
                 num_steps=self.num_gen_steps,
                 num_boxes=self.num_boxes,
-                second_player=second_player
+                second_player=second_player,
+                num_teleporters=self.num_teleporters
             )
         except (RuntimeError, RuntimeWarning) as e:
             print("[SOKOBAN] Runtime Error/Warning: {}".format(e))
@@ -216,6 +276,9 @@ class SokobanEnv(gym.Env):
         self.num_env_steps = 0
         self.reward_last = 0
         self.boxes_on_target = 0
+        
+        # Teleporters are now already placed and validated during room generation
+        # No need to add them separately anymore
 
         starting_observation = self.render(render_mode)
         return starting_observation
@@ -240,8 +303,9 @@ class SokobanEnv(gym.Env):
             arr_goals = (self.room_fixed == 2).view(np.int8)
             arr_boxes = ((self.room_state == 4) + (self.room_state == 3)).view(np.int8)
             arr_player = (self.room_state == 5).view(np.int8)
+            arr_teleporters = (self.room_fixed == 7).view(np.int8)
 
-            return arr_walls, arr_goals, arr_boxes, arr_player
+            return arr_walls, arr_goals, arr_boxes, arr_player, arr_teleporters
 
         else:
             super(SokobanEnv, self).render(mode=mode)  # just raise an exception
@@ -267,6 +331,49 @@ class SokobanEnv(gym.Env):
 
     def get_action_meanings(self):
         return ACTION_LOOKUP
+
+    def set_teleporter_pairs(self, teleporter_pairs):
+        """
+        Set teleporter pairs for the environment.
+        :param teleporter_pairs: List of tuples [(from_pos, to_pos), ...] where each position is (row, col)
+        """
+        self.teleporter_pairs = teleporter_pairs
+        # Update room_fixed to mark teleporter positions
+        for pair in teleporter_pairs:
+            self.room_fixed[pair[0][0], pair[0][1]] = 7
+            self.room_fixed[pair[1][0], pair[1][1]] = 7
+            # If there's no box on the teleporter, update room_state as well
+            if self.room_state[pair[0][0], pair[0][1]] not in [3, 4]:
+                self.room_state[pair[0][0], pair[0][1]] = 7
+            if self.room_state[pair[1][0], pair[1][1]] not in [3, 4]:
+                self.room_state[pair[1][0], pair[1][1]] = 7
+    
+    def add_teleporters_to_room(self, num_teleporters=1):
+        """
+        Adds teleporter pairs to the current room.
+        :param num_teleporters: Number of teleporter pairs to add
+        """
+        for _ in range(num_teleporters):
+            # Find empty spaces (not walls, boxes, targets, or player)
+            possible_positions = np.argwhere((self.room_state == 1) & (self.room_fixed == 1))
+            
+            if len(possible_positions) < 2:
+                print(f"[SOKOBAN] Warning: Not enough space to place teleporter pair")
+                continue
+            
+            # Randomly select two positions for the teleporter pair
+            indices = np.random.choice(len(possible_positions), size=2, replace=False)
+            pos1 = tuple(possible_positions[indices[0]])
+            pos2 = tuple(possible_positions[indices[1]])
+            
+            # Add the teleporter pair
+            self.teleporter_pairs.append((pos1, pos2))
+            
+            # Update room_fixed and room_state
+            self.room_fixed[pos1[0], pos1[1]] = 7
+            self.room_fixed[pos2[0], pos2[1]] = 7
+            self.room_state[pos1[0], pos1[1]] = 7
+            self.room_state[pos2[0], pos2[1]] = 7
 
 
 ACTION_LOOKUP = {

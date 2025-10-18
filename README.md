@@ -40,7 +40,6 @@ python3 solve_and_animate_simple.py
 - ✅ **Box Blocking**: Teleporters deactivate when a box is placed on them
 - ✅ **Multiple Pairs**: Support for multiple independent teleporter pairs
 - ✅ **Automatic & Manual Placement**: Can be randomly placed or manually configured
-- ✅ **Full Rendering Support**: Works with all render modes (rgb_array, tiny, raw)
 
 ### 🎯 Quick Start with Teleporters
 
